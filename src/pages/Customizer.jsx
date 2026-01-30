@@ -4,11 +4,12 @@ import { useSnapshot } from 'valtio';
 
 import LogoControls from '../canvas/LogoControls';
 import TextControls from '../canvas/TextControls';
+import LayerControls from '../canvas/LayerControls';
 import state from '../store';
 import { downloadCanvasToImage, reader } from '../config/helpers';
 import { EditorTabs, FilterTabs, DecalTypes, texturesLogos } from '../config/constants';
 import { fadeAnimation, slideAnimation } from '../config/motion';
-import { ColorPicker, CustomButton, FilePicker, TextureLogoPicker, Tab } from '../components';
+import { ColorPicker, CustomButton, FilePicker, TextureLogoPicker, Tab, ImageCropper, ClothingSelector } from '../components';
 
 const Customizer = () => {
   const snap = useSnapshot(state);
@@ -27,6 +28,8 @@ const Customizer = () => {
   // show tab content depending on the activeTab
   const generateTabContent = () => {
     switch (activeEditorTab) {
+      case "clothingselector":
+        return <ClothingSelector />;
       case "colorpicker":
         return <ColorPicker />
       case "filepicker":
@@ -35,6 +38,8 @@ const Customizer = () => {
           setFile={setFile}
           readFile={readFile}
         />
+      case "layercontrols":
+        return <LayerControls />;
       case "logocontrols":
         return <LogoControls />;
       case "textcontrols":
@@ -123,6 +128,7 @@ const Customizer = () => {
   }
 
   return (
+    <>
     <AnimatePresence>
       {!snap.intro && (
         <>
@@ -175,6 +181,10 @@ const Customizer = () => {
         </>
       )}
     </AnimatePresence>
+    
+    {/* Image Cropper Modal - Outside AnimatePresence */}
+    <ImageCropper />
+    </>
   )
 }
 

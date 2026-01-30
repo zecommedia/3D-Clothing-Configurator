@@ -2,12 +2,20 @@ import { swatch, fileIcon, logoShirt, stylishShirt, logoControls, textIcon, down
 
 export const EditorTabs = [
   {
+    name: "clothingselector",
+    icon: logoShirt,
+  },
+  {
     name: "colorpicker",
     icon: swatch,
   },
   {
     name: "filepicker",
     icon: fileIcon,
+  },
+  {
+    name: "layercontrols",
+    icon: stylishShirt,
   },
   {
     name: "logocontrols",

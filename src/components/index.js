@@ -5,6 +5,7 @@ import Tab from "./Tab";
 import TextureLogoPicker from "./TextureLogoPicker";
 import ImageCropper from "./ImageCropper";
 import ClothingSelector from "./ClothingSelector";
+import MeshSelector from "./MeshSelector";
 
 export { 
   CustomButton,
@@ -14,4 +15,5 @@ export {
   TextureLogoPicker,
   ImageCropper,
   ClothingSelector,
+  MeshSelector,
 };

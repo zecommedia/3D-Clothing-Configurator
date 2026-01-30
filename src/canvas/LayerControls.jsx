@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useSnapshot } from 'valtio';
-import state, { createLayer, createPreset, applyPreset } from '../store';
+import state, { createLayer, createPreset, applyPreset, duplicateLayer, replaceSourceImage, applyCropToImage } from '../store';
 
 const LayerControls = () => {
   const snap = useSnapshot(state);
@@ -8,8 +8,10 @@ const LayerControls = () => {
   const cropFileInputRef = useRef(null);
   const presetImportRef = useRef(null);
   const applyPresetImageRef = useRef(null);
+  const replaceImageRef = useRef(null);
   const [activeTab, setActiveTab] = useState('layers'); // 'layers', 'fullTexture', 'presets'
   const [selectedPresetId, setSelectedPresetId] = useState(null); // For applying preset with new image
+  const [replaceLayerId, setReplaceLayerId] = useState(null); // For replacing source image
 
   // ========== FILE UPLOAD (Direct - no crop) ==========
   const handleFileUpload = (e) => {
@@ -72,6 +74,61 @@ const LayerControls = () => {
       const [removed] = state.layers.splice(index, 1);
       state.layers.splice(newIndex, 0, removed);
     }
+  };
+
+  // ========== SMART OBJECT FUNCTIONS ==========
+  const handleDuplicateLayer = (id) => {
+    duplicateLayer(id);
+  };
+
+  const handleReplaceSourceImage = (id) => {
+    setReplaceLayerId(id);
+    replaceImageRef.current?.click();
+  };
+
+  const handleReplaceImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !replaceLayerId) return;
+    
+    const layer = snap.layers.find(l => l.id === replaceLayerId);
+    if (!layer) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      await replaceSourceImage(layer.sourceImageId, event.target.result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+    setReplaceLayerId(null);
+  };
+
+  const handleRecrop = (id) => {
+    const layer = snap.layers.find(l => l.id === id);
+    if (layer && layer.originalImage) {
+      state.cropperImage = layer.originalImage;
+      state.recropLayerId = id; // Mark that we're re-cropping existing layer
+      state.showCropper = true;
+    }
+  };
+
+  const handleToggleMeshTarget = (layerId, meshIndex) => {
+    const layer = state.layers.find(l => l.id === layerId);
+    if (!layer) return;
+    
+    if (!layer.targetMeshIndices) {
+      layer.targetMeshIndices = [0];
+    }
+    
+    const current = [...layer.targetMeshIndices];
+    const pos = current.indexOf(meshIndex);
+    
+    if (pos === -1) {
+      current.push(meshIndex);
+    } else if (current.length > 1) {
+      current.splice(pos, 1);
+    }
+    
+    layer.targetMeshIndices = current;
   };
 
   // ========== LAYER PROPERTY UPDATES ==========
@@ -295,6 +352,15 @@ const LayerControls = () => {
             >
               ➕ Upload Direct (Multi-select)
             </button>
+            
+            {/* Hidden input for replacing source image */}
+            <input
+              ref={replaceImageRef}
+              type="file"
+              accept="image/*"
+              onChange={handleReplaceImageUpload}
+              className="hidden"
+            />
           </div>
 
           {/* Layer List */}
@@ -326,7 +392,7 @@ const LayerControls = () => {
                       <p className="text-xs text-gray-400">Layer {index + 1}</p>
                     </div>
                     {/* Actions */}
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
                       <button
                         className="p-1 hover:bg-gray-200 rounded text-xs"
                         onClick={(e) => { e.stopPropagation(); handleToggleVisibility(layer.id); }}
@@ -334,6 +400,29 @@ const LayerControls = () => {
                       >
                         {layer.visible ? '👁️' : '🙈'}
                       </button>
+                      <button
+                        className="p-1 hover:bg-blue-200 rounded text-xs"
+                        onClick={(e) => { e.stopPropagation(); handleDuplicateLayer(layer.id); }}
+                        title="Duplicate Layer"
+                      >
+                        📋
+                      </button>
+                      <button
+                        className="p-1 hover:bg-purple-200 rounded text-xs"
+                        onClick={(e) => { e.stopPropagation(); handleReplaceSourceImage(layer.id); }}
+                        title="Replace Image (Smart Object)"
+                      >
+                        🔄
+                      </button>
+                      {layer.originalImage && (
+                        <button
+                          className="p-1 hover:bg-yellow-200 rounded text-xs"
+                          onClick={(e) => { e.stopPropagation(); handleRecrop(layer.id); }}
+                          title="Re-crop"
+                        >
+                          ✂️
+                        </button>
+                      )}
                       <button
                         className="p-1 hover:bg-gray-200 rounded text-xs"
                         onClick={(e) => { e.stopPropagation(); handleMoveLayer(layer.id, 'up'); }}
@@ -390,6 +479,28 @@ const LayerControls = () => {
                   step={1}
                 />
               </div>
+
+              {/* Mesh Target Selector - Only for Hoodie */}
+              {snap.selectedClothing === 'hoodie' && snap.hoodieMeshParts.length > 0 && (
+                <div className="mb-3 bg-blue-50 rounded-lg p-2">
+                  <h5 className="text-xs text-blue-700 font-medium mb-2">🎯 Áp dụng vào mesh:</h5>
+                  <div className="flex flex-wrap gap-1">
+                    {snap.hoodieMeshParts.map((mesh, index) => (
+                      <button
+                        key={index}
+                        onClick={() => handleToggleMeshTarget(activeLayer.id, index)}
+                        className={`px-2 py-1 text-xs rounded transition-colors ${
+                          (activeLayer.targetMeshIndices || [0]).includes(index)
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white border border-gray-300 hover:bg-gray-100'
+                        }`}
+                      >
+                        {mesh.name || `Mesh ${index + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Position */}
               <div className="mb-3">

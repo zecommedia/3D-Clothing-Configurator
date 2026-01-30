@@ -9,6 +9,7 @@ export const clothingModels = [
     meshName: 'T_Shirt_male',
     materialName: 'lambert1',
     type: 'glb',
+    meshParts: [{ id: 0, name: 'Body' }], // T-shirt only has 1 mesh
   },
   {
     id: 'hoodie',
@@ -17,15 +18,17 @@ export const clothingModels = [
     meshName: null,
     materialName: null,
     type: 'glb',
+    meshParts: [], // Will be populated dynamically
   },
 ];
 
 // Layer template for creating new layers
-export const createLayer = (id, image, name = `Layer ${id}`, cropInfo = null) => ({
+export const createLayer = (id, image, name = `Layer ${id}`, cropInfo = null, sourceImageId = null) => ({
   id,
   name,
   image,                                    // Base64 or URL of the image
   originalImage: image,                     // Keep original for re-cropping
+  sourceImageId: sourceImageId || `src_${Date.now()}`, // Smart Object: links layers to same source
   visible: true,
   opacity: 1,
   // Position - Z = 0.3 to be in front of model surface
@@ -40,7 +43,111 @@ export const createLayer = (id, image, name = `Layer ${id}`, cropInfo = null) =>
   blendMode: 'normal',                      // normal, multiply, add, etc.
   // Crop information for presets (null = no crop, use original)
   cropInfo: cropInfo,  // { x, y, width, height, unit } - stores crop coordinates
+  // Mesh indices for Hoodie (which meshes to apply decal to)
+  targetMeshIndices: [0],
 });
+
+// Duplicate a layer with same source (for Smart Object)
+export const duplicateLayer = (layerId) => {
+  const sourceLayer = state.layers.find(l => l.id === layerId);
+  if (!sourceLayer) return null;
+  
+  const newLayer = {
+    ...JSON.parse(JSON.stringify(sourceLayer)), // Deep clone
+    id: state.nextLayerId,
+    name: `${sourceLayer.name} (Copy)`,
+  };
+  
+  state.layers.push(newLayer);
+  state.activeLayerId = state.nextLayerId;
+  state.nextLayerId += 1;
+  
+  return newLayer;
+};
+
+// Apply crop to image
+// NEW format (format='natural'): x/y/width/height are in NATURAL coordinates
+// OLD format (no format field): x/y/width/height are in DISPLAY coordinates, need to scale
+export const applyCropToImage = (originalImage, cropInfo) => {
+  return new Promise((resolve) => {
+    if (!cropInfo || !originalImage) {
+      resolve(originalImage);
+      return;
+    }
+    
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      const origNatWidth = cropInfo.naturalWidth || img.naturalWidth;
+      const origNatHeight = cropInfo.naturalHeight || img.naturalHeight;
+      
+      let cropX, cropY, cropW, cropH;
+      
+      if (cropInfo.format === 'natural') {
+        // NEW FORMAT: coordinates are already in natural pixels
+        // Just scale proportionally to new image size
+        const scaleX = img.naturalWidth / origNatWidth;
+        const scaleY = img.naturalHeight / origNatHeight;
+        
+        cropX = cropInfo.x * scaleX;
+        cropY = cropInfo.y * scaleY;
+        cropW = cropInfo.width * scaleX;
+        cropH = cropInfo.height * scaleY;
+      } else {
+        // OLD FORMAT: coordinates are in DISPLAY pixels
+        // We need to first convert to natural coords, then scale
+        // OLD presets: the crop was done with display coords, then getCroppedImg scaled them
+        // So the actual crop region used was (x * scaleX_old, y * scaleY_old, ...)
+        // where scaleX_old = naturalWidth / displayWidth
+        // But we don't have displayWidth! So we need to estimate.
+        
+        // WORKAROUND: Assume the crop coordinates are proportional to natural dimensions
+        // This works if user uploads image with same aspect ratio
+        const scaleX = img.naturalWidth / origNatWidth;
+        const scaleY = img.naturalHeight / origNatHeight;
+        
+        cropX = cropInfo.x * scaleX;
+        cropY = cropInfo.y * scaleY;
+        cropW = cropInfo.width * scaleX;
+        cropH = cropInfo.height * scaleY;
+      }
+      
+      // Ensure we don't exceed image bounds
+      const safeX = Math.max(0, Math.min(cropX, img.naturalWidth - 1));
+      const safeY = Math.max(0, Math.min(cropY, img.naturalHeight - 1));
+      const safeW = Math.min(cropW, img.naturalWidth - safeX);
+      const safeH = Math.min(cropH, img.naturalHeight - safeY);
+      
+      canvas.width = Math.max(1, Math.round(safeW));
+      canvas.height = Math.max(1, Math.round(safeH));
+      
+      ctx.drawImage(img, safeX, safeY, safeW, safeH, 0, 0, canvas.width, canvas.height);
+      
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(originalImage);
+    img.src = originalImage;
+  });
+};
+
+// Replace source image for all linked layers (Smart Object behavior)
+export const replaceSourceImage = async (sourceImageId, newOriginalImage) => {
+  const linkedLayers = state.layers.filter(l => l.sourceImageId === sourceImageId);
+  
+  for (const layer of linkedLayers) {
+    layer.originalImage = newOriginalImage;
+    
+    // Re-apply crop if exists
+    if (layer.cropInfo) {
+      layer.image = await applyCropToImage(newOriginalImage, layer.cropInfo);
+    } else {
+      layer.image = newOriginalImage;
+    }
+  }
+};
 
 // Create a full preset including all layers and settings
 export const createPreset = (name, state) => ({
@@ -168,6 +275,12 @@ const state = proxy({
   // ========== CLOTHING SELECTION ==========
   selectedClothing: 'tshirt',               // 'tshirt' or 'hoodie'
   
+  // ========== MESH SELECTION FOR DECALS ==========
+  hoodieMeshParts: [],                      // Dynamic mesh parts from Hoodie model
+  selectedMeshIndices: [0],                 // Array of mesh indices to apply decals
+  showMeshSelector: false,                  // Show mesh selector modal
+  pendingFileReadType: null,                // Pending file type to read after mesh selection
+  
   isFrontLogoTexture: true,
   isBackLogoTexture: true,
   isFrontText: true,
@@ -189,6 +302,7 @@ const state = proxy({
   // ========== IMAGE CROPPER ==========
   cropperImage: null,                       // Image being cropped
   showCropper: false,                       // Show cropper modal
+  recropLayerId: null,                      // Layer ID being re-cropped (null = new layer)
   
   // ========== SAVED PRESETS ==========
   savedPresets: [],                         // Array of saved configurations

@@ -16,6 +16,22 @@ const ImageCropper = () => {
   });
   const [completedCrop, setCompletedCrop] = useState(null);
 
+  const isHoodie = snap.selectedClothing === 'hoodie';
+  const meshParts = snap.hoodieMeshParts;
+
+  const toggleMeshSelection = (index) => {
+    const current = [...state.selectedMeshIndices];
+    const pos = current.indexOf(index);
+    
+    if (pos === -1) {
+      current.push(index);
+    } else if (current.length > 1) {
+      current.splice(pos, 1);
+    }
+    
+    state.selectedMeshIndices = current;
+  };
+
   const onImageLoad = useCallback((e) => {
     imgRef.current = e.currentTarget;
     // Set initial crop to center
@@ -59,48 +75,80 @@ const ImageCropper = () => {
 
   const handleApplyCrop = () => {
     const croppedImage = getCroppedImg();
-    if (croppedImage && completedCrop) {
-      // Store crop info for preset functionality
+    if (croppedImage && completedCrop && imgRef.current) {
+      // Calculate scale factors from display to natural
+      const scaleX = imgRef.current.naturalWidth / imgRef.current.width;
+      const scaleY = imgRef.current.naturalHeight / imgRef.current.height;
+      
+      // Store crop info in NATURAL (scaled) coordinates for accurate re-cropping
+      // This makes it independent of display size
       const cropInfo = {
-        x: completedCrop.x,
-        y: completedCrop.y,
-        width: completedCrop.width,
-        height: completedCrop.height,
-        unit: completedCrop.unit || 'px',
-        // Also store natural dimensions for accurate re-cropping
-        naturalWidth: imgRef.current?.naturalWidth,
-        naturalHeight: imgRef.current?.naturalHeight,
+        // Crop coordinates in NATURAL pixels (already scaled)
+        x: completedCrop.x * scaleX,
+        y: completedCrop.y * scaleY,
+        width: completedCrop.width * scaleX,
+        height: completedCrop.height * scaleY,
+        unit: 'px',
+        // Store natural dimensions of the SOURCE image for proportional re-cropping
+        naturalWidth: imgRef.current.naturalWidth,
+        naturalHeight: imgRef.current.naturalHeight,
+        // Mark as new format
+        format: 'natural',
       };
       
-      const newLayer = createLayer(
-        state.nextLayerId,
-        croppedImage,
-        `Cropped ${state.nextLayerId}`,
-        cropInfo
-      );
-      // Store original image for re-cropping with presets
-      newLayer.originalImage = snap.cropperImage;
-      
-      state.layers.push(newLayer);
-      state.activeLayerId = state.nextLayerId;
-      state.nextLayerId += 1;
+      // Check if we're re-cropping an existing layer
+      if (snap.recropLayerId) {
+        const existingLayer = state.layers.find(l => l.id === snap.recropLayerId);
+        if (existingLayer) {
+          existingLayer.image = croppedImage;
+          existingLayer.cropInfo = cropInfo;
+          // Keep original image and other settings
+        }
+      } else {
+        // Create new layer
+        const newLayer = createLayer(
+          state.nextLayerId,
+          croppedImage,
+          `Cropped ${state.nextLayerId}`,
+          cropInfo
+        );
+        // Store original image for re-cropping with presets
+        newLayer.originalImage = snap.cropperImage;
+        // Store selected mesh indices for Hoodie
+        newLayer.targetMeshIndices = [...state.selectedMeshIndices];
+        
+        state.layers.push(newLayer);
+        state.activeLayerId = state.nextLayerId;
+        state.nextLayerId += 1;
+      }
     }
     handleClose();
   };
 
   const handleAddWithoutCrop = () => {
     if (snap.cropperImage) {
-      const newLayer = createLayer(
-        state.nextLayerId,
-        snap.cropperImage,
-        `Layer ${state.nextLayerId}`,
-        null // No crop info
-      );
-      newLayer.originalImage = snap.cropperImage;
-      
-      state.layers.push(newLayer);
-      state.activeLayerId = state.nextLayerId;
-      state.nextLayerId += 1;
+      // Check if we're re-cropping an existing layer
+      if (snap.recropLayerId) {
+        const existingLayer = state.layers.find(l => l.id === snap.recropLayerId);
+        if (existingLayer) {
+          existingLayer.image = snap.cropperImage;
+          existingLayer.cropInfo = null; // Remove crop
+        }
+      } else {
+        const newLayer = createLayer(
+          state.nextLayerId,
+          snap.cropperImage,
+          `Layer ${state.nextLayerId}`,
+          null // No crop info
+        );
+        newLayer.originalImage = snap.cropperImage;
+        // Store selected mesh indices for Hoodie
+        newLayer.targetMeshIndices = [...state.selectedMeshIndices];
+        
+        state.layers.push(newLayer);
+        state.activeLayerId = state.nextLayerId;
+        state.nextLayerId += 1;
+      }
     }
     handleClose();
   };
@@ -108,6 +156,7 @@ const ImageCropper = () => {
   const handleClose = () => {
     state.showCropper = false;
     state.cropperImage = null;
+    state.recropLayerId = null; // Reset recrop state
   };
 
   if (!snap.showCropper || !snap.cropperImage) return null;
@@ -171,6 +220,28 @@ const ImageCropper = () => {
             ))}
           </div>
         </div>
+
+        {/* Mesh Selector for Hoodie */}
+        {isHoodie && meshParts.length > 0 && (
+          <div className="mb-4 border rounded-lg p-3 bg-blue-50">
+            <p className="text-sm font-medium text-blue-800 mb-2">🎯 Chọn phần mesh để áp dụng:</p>
+            <div className="flex flex-wrap gap-2">
+              {meshParts.map((mesh, index) => (
+                <button
+                  key={index}
+                  onClick={() => toggleMeshSelection(index)}
+                  className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                    snap.selectedMeshIndices.includes(index)
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white border border-gray-300 hover:bg-gray-100'
+                  }`}
+                >
+                  {mesh.name || `Mesh ${index + 1}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex gap-3 justify-end">

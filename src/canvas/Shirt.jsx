@@ -1,4 +1,4 @@
-import React, { useMemo, Suspense, useEffect, useState } from 'react'
+import React, { useMemo, Suspense, useEffect, useState, useRef } from 'react'
 import * as THREE from 'three';
 import { easing } from 'maath';
 import { useSnapshot } from 'valtio';
@@ -6,6 +6,10 @@ import { useFrame } from '@react-three/fiber';
 import { Decal, useGLTF, useTexture, OrbitControls } from '@react-three/drei';
 
 import state, { clothingModels } from '../store';
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
 // Helper function to apply border radius to an image
 const applyBorderRadius = (imageSrc, borderRadius) => {
@@ -24,25 +28,30 @@ const applyBorderRadius = (imageSrc, borderRadius) => {
       canvas.width = img.width;
       canvas.height = img.height;
       
-      // Calculate radius based on percentage of smallest dimension
-      const minDimension = Math.min(img.width, img.height);
-      const radius = (borderRadius / 100) * (minDimension / 2);
+      const radiusX = (borderRadius / 100) * (img.width / 2);
+      const radiusY = (borderRadius / 100) * (img.height / 2);
       
-      // Draw rounded rectangle path
       ctx.beginPath();
-      ctx.moveTo(radius, 0);
-      ctx.lineTo(img.width - radius, 0);
-      ctx.quadraticCurveTo(img.width, 0, img.width, radius);
-      ctx.lineTo(img.width, img.height - radius);
-      ctx.quadraticCurveTo(img.width, img.height, img.width - radius, img.height);
-      ctx.lineTo(radius, img.height);
-      ctx.quadraticCurveTo(0, img.height, 0, img.height - radius);
-      ctx.lineTo(0, radius);
-      ctx.quadraticCurveTo(0, 0, radius, 0);
+      
+      if (borderRadius >= 50) {
+        ctx.ellipse(img.width / 2, img.height / 2, img.width / 2, img.height / 2, 0, 0, Math.PI * 2);
+      } else {
+        const rx = Math.min(radiusX, img.width / 2);
+        const ry = Math.min(radiusY, img.height / 2);
+        
+        ctx.moveTo(rx, 0);
+        ctx.lineTo(img.width - rx, 0);
+        ctx.ellipse(img.width - rx, ry, rx, ry, 0, -Math.PI/2, 0);
+        ctx.lineTo(img.width, img.height - ry);
+        ctx.ellipse(img.width - rx, img.height - ry, rx, ry, 0, 0, Math.PI/2);
+        ctx.lineTo(rx, img.height);
+        ctx.ellipse(rx, img.height - ry, rx, ry, 0, Math.PI/2, Math.PI);
+        ctx.lineTo(0, ry);
+        ctx.ellipse(rx, ry, rx, ry, 0, Math.PI, Math.PI * 1.5);
+      }
+      
       ctx.closePath();
       ctx.clip();
-      
-      // Draw the image
       ctx.drawImage(img, 0, 0);
       
       resolve(canvas.toDataURL('image/png'));
@@ -52,21 +61,30 @@ const applyBorderRadius = (imageSrc, borderRadius) => {
   });
 };
 
-// Component to render a single layer with its own texture and border radius
-const LayerDecal = ({ layer }) => {
+// ============================================================================
+// LAYER DECAL COMPONENT
+// ============================================================================
+
+const LayerDecal = ({ layer, parentMesh }) => {
   const [processedImage, setProcessedImage] = useState(layer.image);
   
-  // Apply border radius when layer changes
   useEffect(() => {
-    applyBorderRadius(layer.image, layer.borderRadius || 0).then(setProcessedImage);
+    applyBorderRadius(layer.image, layer.borderRadius || 0)
+      .then(setProcessedImage);
   }, [layer.image, layer.borderRadius]);
   
   const texture = useTexture(processedImage);
   
-  if (!layer.visible) return null;
+  // Debug log
+  useEffect(() => {
+    console.log('LayerDecal rendering:', layer.name, 'position:', layer.position, 'scale:', layer.scale, 'visible:', layer.visible, 'parentMesh:', !!parentMesh?.current);
+  }, [layer, parentMesh]);
+  
+  if (!layer.visible || !parentMesh?.current) return null;
   
   return (
     <Decal
+      mesh={parentMesh}
       position={layer.position}
       rotation={layer.rotation}
       scale={layer.scale}
@@ -74,126 +92,240 @@ const LayerDecal = ({ layer }) => {
       map-anisotropy={16}
       depthTest={false}
       depthWrite={true}
+      polygonOffsetFactor={-10}
       transparent={true}
-      opacity={layer.opacity}
     />
   );
 };
 
-// T-Shirt Model Component
-const TShirtModel = ({ snap, logoTexture, fullTexture, backLogoTexture, createTextTexture }) => {
-  const { nodes, materials } = useGLTF('/shirt.glb');
+// ============================================================================
+// UNIVERSAL GLB MODEL COMPONENT
+// ============================================================================
+
+// This component can load ANY GLB model and apply:
+// - Color changes
+// - Decals (logos, layers, text)
+// - Proper centering and scaling
+const UniversalGLBModel = ({ 
+  modelPath, 
+  snap, 
+  logoTexture, 
+  fullTexture, 
+  backLogoTexture, 
+  createTextTexture,
+  // Optional overrides for specific models
+  customScale = null,
+  customPosition = null,
+  skipCenter = false,
+}) => {
+  const { scene } = useGLTF(modelPath);
+  const [modelData, setModelData] = useState({ ready: false, mainMesh: null });
+  const groupRef = useRef();
+  const mainMeshRef = useRef();
   
-  useFrame((state, delta) => {
-    if (materials.lambert1) {
-      easing.dampC(materials.lambert1.color, snap.color, 0.25, delta);
-    }
-  });
-
-  return (
-    <mesh
-      geometry={nodes.T_Shirt_male.geometry}
-      material={materials.lambert1}
-      material-metalness={0.1}
-      dispose={null}
-    >
-      {/* Full Texture with controls */}
-      {snap.isFullTexture && (
-        <Decal
-          position={snap.fullTexturePosition}
-          rotation={snap.fullTextureRotation}
-          scale={snap.fullTextureScale}
-          map={fullTexture}
-          depthTest={false}
-          depthWrite={true}
-        />
-      )}
-
-      {/* Multi-layer system - render all visible layers */}
-      {snap.layers.map((layer) => (
-        <LayerDecal key={layer.id} layer={layer} />
-      ))}
-
-      {/* Front Logo */}
-      {snap.isFrontLogoTexture && (
-        <Decal
-          position={snap.frontLogoPosition}
-          rotation={snap.frontLogoRotation}
-          scale={snap.frontLogoScale}
-          map={logoTexture}
-          map-anisotropy={16}
-          depthTest={false}
-          depthWrite={true}
-        />
-      )}
-      
-      {snap.isFrontText && (
-        <Decal
-          position={snap.frontTextPosition}
-          rotation={snap.frontTextRotation}
-          scale={snap.frontTextScale}
-          map={createTextTexture(snap.frontText, snap.frontTextFont, snap.frontTextSize, snap.frontTextColor)}
-        />
-      )}
-
-      {snap.isBackLogoTexture && (
-        <Decal
-          position={snap.backLogoPosition}
-          rotation={snap.backLogoRotation}
-          scale={snap.backLogoScale}
-          map={backLogoTexture}
-          map-anisotropy={16}
-          depthTest={false}
-          depthWrite={true}
-        />
-      )}
-      
-      {snap.isBackText && (
-        <Decal
-          position={snap.backTextPosition}
-          rotation={snap.backTextRotation}
-          scale={snap.backTextScale}
-          map={createTextTexture(snap.backText, snap.backTextFont, snap.backTextSize, snap.backTextColor)}
-        />
-      )}
-    </mesh>
-  );
-};
-
-// Hoodie Model Component
-const HoodieModel = ({ snap }) => {
-  const { scene } = useGLTF('/urban_streetwear_hoodie__3d_clothing.glb');
-  
-  // Clone scene to avoid modifying the cached original
-  const clonedScene = useMemo(() => {
-    const clone = scene.clone();
+  // Process the model: clone, fix materials, center, find main mesh
+  const processedModel = useMemo(() => {
+    const clone = scene.clone(true);
     
-    // Find and store materials for color changing
+    // Calculate bounding box for centering
+    const box = new THREE.Box3().setFromObject(clone);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    
+    // Calculate auto scale to fit nicely in view
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const autoScale = maxDim > 0 ? 1.5 / maxDim : 1;
+    
+    let mainMesh = null;
+    let maxVertices = 0;
+    
     clone.traverse((child) => {
-      if (child.isMesh && child.material) {
-        // Clone material so we can modify it
-        child.material = child.material.clone();
+      if (child.isMesh) {
+        // Replace material with MeshStandardMaterial for color support
+        if (child.material) {
+          const newMat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(0x888888),
+            roughness: 0.85,
+            metalness: 0.05,
+            side: THREE.DoubleSide,
+          });
+          child.material = newMat;
+        }
+        
+        // Find mesh with most vertices (main body for decals)
+        if (child.geometry?.attributes?.position) {
+          const vertexCount = child.geometry.attributes.position.count;
+          if (vertexCount > maxVertices) {
+            maxVertices = vertexCount;
+            mainMesh = child;
+          }
+        }
       }
     });
     
-    return clone;
-  }, [scene]);
+    // Center the model (unless skipCenter is true)
+    if (!skipCenter) {
+      clone.position.sub(center);
+    }
+    
+    return { 
+      clone, 
+      mainMesh, 
+      autoScale,
+      center,
+      size
+    };
+  }, [scene, skipCenter]);
 
-  // Update color on all meshes
-  useFrame((state, delta) => {
-    clonedScene.traverse((child) => {
-      if (child.isMesh && child.material && child.material.color) {
+  useEffect(() => {
+    if (processedModel.mainMesh) {
+      // Debug log
+      console.log('=== MODEL DEBUG ===');
+      console.log('MainMesh found:', processedModel.mainMesh.name);
+      console.log('Geometry vertices:', processedModel.mainMesh.geometry?.attributes?.position?.count);
+      console.log('Geometry has normals:', !!processedModel.mainMesh.geometry?.attributes?.normal);
+      console.log('Geometry has uvs:', !!processedModel.mainMesh.geometry?.attributes?.uv);
+      console.log('MainMesh position:', processedModel.mainMesh.position);
+      console.log('MainMesh rotation:', processedModel.mainMesh.rotation);
+      console.log('MainMesh scale:', processedModel.mainMesh.scale);
+      console.log('MainMesh parent:', processedModel.mainMesh.parent?.name);
+      console.log('Clone position:', processedModel.clone.position);
+      console.log('Center offset:', processedModel.center);
+      console.log('Model size:', processedModel.size);
+      console.log('skipCenter:', skipCenter);
+      console.log('===================');
+      
+      // Store reference to mainMesh for decal rendering
+      mainMeshRef.current = processedModel.mainMesh;
+      
+      setModelData({ 
+        ready: true, 
+        mainMesh: processedModel.mainMesh,
+        center: processedModel.center,
+        size: processedModel.size
+      });
+    }
+  }, [processedModel, skipCenter]);
+
+  // Animate color changes
+  useFrame((_, delta) => {
+    processedModel.clone.traverse((child) => {
+      if (child.isMesh && child.material?.color) {
         easing.dampC(child.material.color, snap.color, 0.25, delta);
       }
     });
   });
 
+  const finalScale = customScale || processedModel.autoScale;
+  const finalPosition = customPosition || [0, 0, 0];
+
   return (
-    <group scale={1.5} position={[0, -0.3, 0]}>
-      <primitive object={clonedScene} />
+    <group ref={groupRef} scale={finalScale} position={finalPosition}>
+      <primitive object={processedModel.clone} />
+      
+      {/* Decals - render using mesh prop pointing to mainMesh */}
+      {modelData.ready && mainMeshRef.current && (
+        <>
+          {/* Full Texture */}
+          {snap.isFullTexture && (
+            <Decal
+              mesh={mainMeshRef}
+              position={snap.fullTexturePosition}
+              rotation={snap.fullTextureRotation}
+              scale={snap.fullTextureScale}
+              map={fullTexture}
+              depthTest={false}
+              depthWrite={true}
+            />
+          )}
+
+          {/* Multi-layer system - Custom uploaded images */}
+          {snap.layers.map((layer) => (
+            <LayerDecal key={layer.id} layer={layer} parentMesh={mainMeshRef} />
+          ))}
+
+          {/* Front Logo */}
+          {snap.isFrontLogoTexture && (
+            <Decal
+              mesh={mainMeshRef}
+              position={snap.frontLogoPosition}
+              rotation={snap.frontLogoRotation}
+              scale={snap.frontLogoScale}
+              map={logoTexture}
+              map-anisotropy={16}
+              depthTest={false}
+              depthWrite={true}
+            />
+          )}
+          
+          {/* Front Text */}
+          {snap.isFrontText && (
+            <Decal
+              mesh={mainMeshRef}
+              position={snap.frontTextPosition}
+              rotation={snap.frontTextRotation}
+              scale={snap.frontTextScale}
+              map={createTextTexture(snap.frontText, snap.frontTextFont, snap.frontTextSize, snap.frontTextColor)}
+            />
+          )}
+
+          {/* Back Logo */}
+          {snap.isBackLogoTexture && (
+            <Decal
+              mesh={mainMeshRef}
+              position={snap.backLogoPosition}
+              rotation={snap.backLogoRotation}
+              scale={snap.backLogoScale}
+              map={backLogoTexture}
+              map-anisotropy={16}
+              depthTest={false}
+              depthWrite={true}
+            />
+          )}
+          
+          {/* Back Text */}
+          {snap.isBackText && (
+            <Decal
+              mesh={mainMeshRef}
+              position={snap.backTextPosition}
+              rotation={snap.backTextRotation}
+              scale={snap.backTextScale}
+              map={createTextTexture(snap.backText, snap.backTextFont, snap.backTextSize, snap.backTextColor)}
+            />
+          )}
+        </>
+      )}
     </group>
   );
 };
+
+// ============================================================================
+// MODEL CONFIGURATIONS
+// ============================================================================
+
+// Model-specific configurations (optional overrides)
+// If not specified, auto-scale and auto-center will be used
+const MODEL_CONFIGS = {
+  'tshirt': {
+    scale: 11,
+    position: [0, 0, 0],
+    // Don't center T-shirt - it's already centered in the GLB
+    skipCenter: true,
+  },
+  'hoodie': {
+    scale: 2.5,
+    position: [0, 0, 0],
+    skipCenter: false, // Hoodie needs centering
+  },
+  // Add more models here - they will work automatically!
+  // Just add the GLB file to /public and add to clothingModels in store
+  // 'jacket': { scale: 2, position: [0, 0, 0] },
+  // 'pants': { scale: 1.5, position: [0, -0.5, 0] },
+};
+
+// ============================================================================
+// MAIN SHIRT COMPONENT
+// ============================================================================
 
 const Shirt = () => {
   const snap = useSnapshot(state);
@@ -209,13 +341,17 @@ const Shirt = () => {
     const ctx = canvas.getContext('2d');
     ctx.font = `${size}px ${font}`;
     const textWidth = ctx.measureText(text).width;
-    canvas.width = textWidth;
-    canvas.height = size;
+    canvas.width = textWidth || 100;
+    canvas.height = size || 64;
     ctx.fillStyle = color;
     ctx.font = `${size}px ${font}`;
     ctx.fillText(text, 0, size);
     return new THREE.CanvasTexture(canvas);
   };
+
+  // Find current model config
+  const currentModel = clothingModels.find(m => m.id === snap.selectedClothing);
+  const modelConfig = MODEL_CONFIGS[snap.selectedClothing] || {};
 
   const sharedProps = {
     snap,
@@ -230,16 +366,24 @@ const Shirt = () => {
       <OrbitControls />
       <group key={stateString}>
         <Suspense fallback={null}>
-          {snap.selectedClothing === 'tshirt' && <TShirtModel {...sharedProps} />}
-          {snap.selectedClothing === 'hoodie' && <HoodieModel {...sharedProps} />}
+          {currentModel && (
+            <UniversalGLBModel 
+              modelPath={currentModel.file}
+              customScale={modelConfig.scale}
+              customPosition={modelConfig.position}
+              skipCenter={modelConfig.skipCenter || false}
+              {...sharedProps} 
+            />
+          )}
         </Suspense>
       </group>
     </>
   );
 };
 
-// Preload models
-useGLTF.preload('/shirt.glb');
-useGLTF.preload('/urban_streetwear_hoodie__3d_clothing.glb');
+// Preload all models
+clothingModels.forEach(model => {
+  useGLTF.preload(model.file);
+});
 
 export default Shirt;

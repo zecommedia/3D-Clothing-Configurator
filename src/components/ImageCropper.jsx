@@ -59,12 +59,28 @@ const ImageCropper = () => {
 
   const handleApplyCrop = () => {
     const croppedImage = getCroppedImg();
-    if (croppedImage) {
+    if (croppedImage && completedCrop) {
+      // Store crop info for preset functionality
+      const cropInfo = {
+        x: completedCrop.x,
+        y: completedCrop.y,
+        width: completedCrop.width,
+        height: completedCrop.height,
+        unit: completedCrop.unit || 'px',
+        // Also store natural dimensions for accurate re-cropping
+        naturalWidth: imgRef.current?.naturalWidth,
+        naturalHeight: imgRef.current?.naturalHeight,
+      };
+      
       const newLayer = createLayer(
         state.nextLayerId,
         croppedImage,
-        `Cropped ${state.nextLayerId}`
+        `Cropped ${state.nextLayerId}`,
+        cropInfo
       );
+      // Store original image for re-cropping with presets
+      newLayer.originalImage = snap.cropperImage;
+      
       state.layers.push(newLayer);
       state.activeLayerId = state.nextLayerId;
       state.nextLayerId += 1;
@@ -77,8 +93,11 @@ const ImageCropper = () => {
       const newLayer = createLayer(
         state.nextLayerId,
         snap.cropperImage,
-        `Layer ${state.nextLayerId}`
+        `Layer ${state.nextLayerId}`,
+        null // No crop info
       );
+      newLayer.originalImage = snap.cropperImage;
+      
       state.layers.push(newLayer);
       state.activeLayerId = state.nextLayerId;
       state.nextLayerId += 1;

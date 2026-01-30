@@ -1,0 +1,64 @@
+# MTL Exporter v1.0 by Seungwoo Oh at CLO - Virtual Fashion Inc.
+newmtl Knit_Fleece_Terry_FRONT_1944906
+Ka 0.211756 0.195622 0.158313
+Kd 0.674971 0.623545 0.504621
+Ks 0.075000 0.075000 0.075000
+Ns 28.763239
+illum 2
+map_Ka Hoodie_0_diffuse_13.png
+map_Kd Hoodie_0_diffuse_13.png
+map_Kn Hoodie_0_normal_13.png
+newmtl Rib_wide_FRONT_1944924
+Ka 0.257132 0.257132 0.257132
+Kd 0.819608 0.819608 0.819608
+Ks 0.075000 0.075000 0.075000
+Ns 28.763239
+illum 2
+map_Ka Hoodie_0_diffuse.png
+map_Kd Hoodie_0_diffuse.png
+map_Kn Hoodie_0_normal.png
+newmtl Material2480353
+Ka 0.178480 0.132095 0.047393
+Kd 0.568904 0.421053 0.151065
+Ks 0.900000 0.900000 0.900000
+Ns 128.000000
+illum 2
+map_Ka Hoodie_0_diffuse_10.png
+map_Kd Hoodie_0_diffuse_10.png
+map_Kn Hoodie_0_normal_10.png
+newmtl Holes_FRONT_1944945
+Ka 0.257132 0.257132 0.257132
+Kd 0.819608 0.819608 0.819608
+Ks 0.075000 0.075000 0.075000
+Ns 28.763239
+illum 2
+map_Ka Hoodie_0_diffuse_3.png
+map_Kd Hoodie_0_diffuse_3.png
+map_Kn Hoodie_0_normal_3.png
+newmtl Straps_FRONT_1944954
+Ka 0.257132 0.257132 0.257132
+Kd 0.819608 0.819608 0.819608
+Ks 0.075000 0.075000 0.075000
+Ns 28.763239
+illum 2
+map_Ka Hoodie_0_diffuse_3.png
+map_Kd Hoodie_0_diffuse_3.png
+map_Kn Hoodie_0_normal_3.png
+newmtl Material125269
+Ka 0.140162 0.089744 0.062518
+Kd 0.446767 0.286059 0.199277
+Ks 0.900000 0.900000 0.900000
+Ns 128.000000
+illum 2
+newmtl Material2501413
+Ka 0.140162 0.089744 0.062518
+Kd 0.446767 0.286059 0.199277
+Ks 0.900000 0.900000 0.900000
+Ns 128.000000
+illum 2
+newmtl Material2501423
+Ka 0.140162 0.089744 0.062518
+Kd 0.446767 0.286059 0.199277
+Ks 0.900000 0.900000 0.900000
+Ns 128.000000
+illum 2

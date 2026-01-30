@@ -8,34 +8,158 @@ export const clothingModels = [
     file: '/shirt.glb',
     meshName: 'T_Shirt_male',
     materialName: 'lambert1',
+    type: 'glb',
   },
   {
     id: 'hoodie',
     name: 'Hoodie',
     file: '/urban_streetwear_hoodie__3d_clothing.glb',
-    meshName: null,  // Will auto-detect
+    meshName: null,
     materialName: null,
+    type: 'glb',
   },
 ];
 
 // Layer template for creating new layers
-export const createLayer = (id, image, name = `Layer ${id}`) => ({
+export const createLayer = (id, image, name = `Layer ${id}`, cropInfo = null) => ({
   id,
   name,
   image,                                    // Base64 or URL of the image
+  originalImage: image,                     // Keep original for re-cropping
   visible: true,
   opacity: 1,
-  // Position
-  position: [0, 0, 0],
+  // Position - Z = 0.3 to be in front of model surface
+  position: [0, 0, 0.3],
   // Rotation (radians)
   rotation: [0, 0, 0],
-  // Scale (separate X, Y, Z)
-  scale: [1, 1, 1],
+  // Scale - smaller default for better control
+  scale: [0.3, 0.3, 0.3],
   // Border radius (0-50, percentage of smallest dimension)
   borderRadius: 0,
   // Blending
   blendMode: 'normal',                      // normal, multiply, add, etc.
+  // Crop information for presets (null = no crop, use original)
+  cropInfo: cropInfo,  // { x, y, width, height, unit } - stores crop coordinates
 });
+
+// Create a full preset including all layers and settings
+export const createPreset = (name, state) => ({
+  id: Date.now(),
+  name,
+  date: new Date().toISOString(),
+  version: '2.0', // Preset version for compatibility
+  data: {
+    // All layers with their settings
+    layers: state.layers.map(layer => ({
+      ...layer,
+      // Store image as base64 (or could be removed to save only settings)
+      image: layer.image,
+      originalImage: layer.originalImage || layer.image,
+    })),
+    // Layer count and next ID
+    nextLayerId: state.nextLayerId,
+    activeLayerId: state.activeLayerId,
+    // Full texture settings
+    fullTexturePosition: [...state.fullTexturePosition],
+    fullTextureRotation: [...state.fullTextureRotation],
+    fullTextureScale: [...state.fullTextureScale],
+    isFullTexture: state.isFullTexture,
+    fullDecal: state.fullDecal,
+    // Color
+    color: state.color,
+    // Selected clothing
+    selectedClothing: state.selectedClothing,
+    // Front/Back logo and text settings
+    isFrontLogoTexture: state.isFrontLogoTexture,
+    isBackLogoTexture: state.isBackLogoTexture,
+    isFrontText: state.isFrontText,
+    isBackText: state.isBackText,
+    frontLogoDecal: state.frontLogoDecal,
+    backLogoDecal: state.backLogoDecal,
+    frontLogoPosition: [...state.frontLogoPosition],
+    frontLogoRotation: [...state.frontLogoRotation],
+    frontLogoScale: [...state.frontLogoScale],
+    backLogoPosition: [...state.backLogoPosition],
+    backLogoRotation: [...state.backLogoRotation],
+    backLogoScale: [...state.backLogoScale],
+    frontText: state.frontText,
+    frontTextPosition: [...state.frontTextPosition],
+    frontTextRotation: [...state.frontTextRotation],
+    frontTextScale: [...state.frontTextScale],
+    frontTextFont: state.frontTextFont,
+    frontTextSize: state.frontTextSize,
+    frontTextColor: state.frontTextColor,
+    backText: state.backText,
+    backTextPosition: [...state.backTextPosition],
+    backTextRotation: [...state.backTextRotation],
+    backTextScale: [...state.backTextScale],
+    backTextFont: state.backTextFont,
+    backTextSize: state.backTextSize,
+    backTextColor: state.backTextColor,
+  },
+});
+
+// Apply a preset, optionally with a new image to replace layer images
+export const applyPreset = (preset, newImage = null) => {
+  const data = preset.data;
+  
+  // Apply layers with optional new image
+  if (newImage) {
+    // Replace all layer images with the new image, keeping settings
+    state.layers = data.layers.map((layer, index) => ({
+      ...layer,
+      id: layer.id,
+      image: newImage, // Use new image
+      originalImage: newImage,
+    }));
+  } else {
+    state.layers = JSON.parse(JSON.stringify(data.layers));
+  }
+  
+  state.nextLayerId = data.nextLayerId || state.layers.length + 1;
+  state.activeLayerId = state.layers.length > 0 ? state.layers[0].id : null;
+  
+  // Apply full texture settings
+  state.fullTexturePosition = data.fullTexturePosition || [0, 0, 0];
+  state.fullTextureRotation = data.fullTextureRotation || [0, 0, 0];
+  state.fullTextureScale = data.fullTextureScale || [1, 1, 1];
+  state.isFullTexture = data.isFullTexture ?? false;
+  if (data.fullDecal) state.fullDecal = data.fullDecal;
+  
+  // Apply color
+  state.color = data.color || '#EFBD48';
+  
+  // Apply clothing selection
+  if (data.selectedClothing) state.selectedClothing = data.selectedClothing;
+  
+  // Apply logo/text settings if present
+  if (data.isFrontLogoTexture !== undefined) state.isFrontLogoTexture = data.isFrontLogoTexture;
+  if (data.isBackLogoTexture !== undefined) state.isBackLogoTexture = data.isBackLogoTexture;
+  if (data.isFrontText !== undefined) state.isFrontText = data.isFrontText;
+  if (data.isBackText !== undefined) state.isBackText = data.isBackText;
+  if (data.frontLogoDecal) state.frontLogoDecal = data.frontLogoDecal;
+  if (data.backLogoDecal) state.backLogoDecal = data.backLogoDecal;
+  if (data.frontLogoPosition) state.frontLogoPosition = [...data.frontLogoPosition];
+  if (data.frontLogoRotation) state.frontLogoRotation = [...data.frontLogoRotation];
+  if (data.frontLogoScale) state.frontLogoScale = [...data.frontLogoScale];
+  if (data.backLogoPosition) state.backLogoPosition = [...data.backLogoPosition];
+  if (data.backLogoRotation) state.backLogoRotation = [...data.backLogoRotation];
+  if (data.backLogoScale) state.backLogoScale = [...data.backLogoScale];
+  if (data.frontText !== undefined) state.frontText = data.frontText;
+  if (data.frontTextPosition) state.frontTextPosition = [...data.frontTextPosition];
+  if (data.frontTextRotation) state.frontTextRotation = [...data.frontTextRotation];
+  if (data.frontTextScale) state.frontTextScale = [...data.frontTextScale];
+  if (data.frontTextFont) state.frontTextFont = data.frontTextFont;
+  if (data.frontTextSize) state.frontTextSize = data.frontTextSize;
+  if (data.frontTextColor) state.frontTextColor = data.frontTextColor;
+  if (data.backText !== undefined) state.backText = data.backText;
+  if (data.backTextPosition) state.backTextPosition = [...data.backTextPosition];
+  if (data.backTextRotation) state.backTextRotation = [...data.backTextRotation];
+  if (data.backTextScale) state.backTextScale = [...data.backTextScale];
+  if (data.backTextFont) state.backTextFont = data.backTextFont;
+  if (data.backTextSize) state.backTextSize = data.backTextSize;
+  if (data.backTextColor) state.backTextColor = data.backTextColor;
+};
 
 const state = proxy({
   intro: true,

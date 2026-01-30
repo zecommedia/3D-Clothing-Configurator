@@ -5,6 +5,15 @@ import state, { clothingModels } from '../store';
 const ClothingSelector = () => {
   const snap = useSnapshot(state);
 
+  const getClothingIcon = (id) => {
+    switch (id) {
+      case 'tshirt': return '👕';
+      case 'hoodie': return '🧥';
+      case 'hoodie-clo': return '🧥';
+      default: return '👔';
+    }
+  };
+
   return (
     <div className="absolute left-full ml-3 bg-white rounded-lg shadow-lg p-4 w-64">
       <h3 className="text-sm font-bold text-gray-800 mb-3">👕 Select Clothing</h3>
@@ -23,14 +32,14 @@ const ClothingSelector = () => {
             }}
           >
             <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-2xl">
-              {clothing.id === 'tshirt' ? '👕' : '🧥'}
+              {getClothingIcon(clothing.id)}
             </div>
-            <div className="text-left">
+            <div className="text-left flex-1">
               <p className="font-medium text-gray-800">{clothing.name}</p>
-              <p className="text-xs text-gray-500">{clothing.file}</p>
+              <p className="text-xs text-gray-500">{clothing.type?.toUpperCase() || 'GLB'}</p>
             </div>
             {snap.selectedClothing === clothing.id && (
-              <div className="ml-auto text-blue-500">✓</div>
+              <div className="text-blue-500">✓</div>
             )}
           </button>
         ))}

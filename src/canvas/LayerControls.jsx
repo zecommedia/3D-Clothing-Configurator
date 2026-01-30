@@ -1,12 +1,15 @@
 import React, { useState, useRef } from 'react';
 import { useSnapshot } from 'valtio';
-import state, { createLayer } from '../store';
+import state, { createLayer, createPreset, applyPreset } from '../store';
 
 const LayerControls = () => {
   const snap = useSnapshot(state);
   const fileInputRef = useRef(null);
   const cropFileInputRef = useRef(null);
+  const presetImportRef = useRef(null);
+  const applyPresetImageRef = useRef(null);
   const [activeTab, setActiveTab] = useState('layers'); // 'layers', 'fullTexture', 'presets'
+  const [selectedPresetId, setSelectedPresetId] = useState(null); // For applying preset with new image
 
   // ========== FILE UPLOAD (Direct - no crop) ==========
   const handleFileUpload = (e) => {
@@ -92,33 +95,42 @@ const LayerControls = () => {
     const presetName = prompt('Enter preset name:');
     if (!presetName) return;
 
-    const preset = {
-      id: Date.now(),
-      name: presetName,
-      date: new Date().toISOString(),
-      data: {
-        layers: JSON.parse(JSON.stringify(snap.layers)),
-        fullTexturePosition: [...snap.fullTexturePosition],
-        fullTextureRotation: [...snap.fullTextureRotation],
-        fullTextureScale: [...snap.fullTextureScale],
-        color: snap.color,
-      },
-    };
+    const preset = createPreset(presetName, snap);
     state.savedPresets.push(preset);
     localStorage.setItem('clothingPresets', JSON.stringify(state.savedPresets));
-    alert(`Preset "${presetName}" saved!`);
+    alert(`Preset "${presetName}" saved with ${snap.layers.length} layers!`);
   };
 
   const loadPreset = (preset) => {
-    state.layers = JSON.parse(JSON.stringify(preset.data.layers));
-    state.fullTexturePosition = [...preset.data.fullTexturePosition];
-    state.fullTextureRotation = [...preset.data.fullTextureRotation];
-    state.fullTextureScale = [...preset.data.fullTextureScale];
-    state.color = preset.data.color;
-    state.activeLayerId = state.layers.length > 0 ? state.layers[0].id : null;
+    applyPreset(preset);
+    alert(`Preset "${preset.name}" loaded successfully!`);
+  };
+
+  // Apply preset with a new image - will replace all layer images
+  const handleApplyPresetWithNewImage = (preset) => {
+    setSelectedPresetId(preset.id);
+    applyPresetImageRef.current?.click();
+  };
+
+  const handleNewImageForPreset = (e) => {
+    const file = e.target.files[0];
+    if (!file || !selectedPresetId) return;
+    
+    const preset = snap.savedPresets.find(p => p.id === selectedPresetId);
+    if (!preset) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      applyPreset(preset, event.target.result);
+      alert(`Preset "${preset.name}" applied with new image!`);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+    setSelectedPresetId(null);
   };
 
   const deletePreset = (id) => {
+    if (!confirm('Are you sure you want to delete this preset?')) return;
     const index = state.savedPresets.findIndex((p) => p.id === id);
     if (index !== -1) {
       state.savedPresets.splice(index, 1);
@@ -127,18 +139,35 @@ const LayerControls = () => {
   };
 
   const exportPreset = () => {
-    const data = {
-      layers: snap.layers,
-      fullTexturePosition: snap.fullTexturePosition,
-      fullTextureRotation: snap.fullTextureRotation,
-      fullTextureScale: snap.fullTextureScale,
-      color: snap.color,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const preset = createPreset(`Export-${Date.now()}`, snap);
+    const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `clothing-preset-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Export preset without images (settings only) - smaller file size
+  const exportPresetSettingsOnly = () => {
+    const preset = createPreset(`Settings-${Date.now()}`, snap);
+    // Remove image data to reduce file size
+    preset.data.layers = preset.data.layers.map(layer => ({
+      ...layer,
+      image: null, // Remove base64 image
+      originalImage: null,
+    }));
+    preset.data.fullDecal = null;
+    preset.data.frontLogoDecal = null;
+    preset.data.backLogoDecal = null;
+    preset.settingsOnly = true;
+    
+    const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clothing-preset-settings-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -149,19 +178,30 @@ const LayerControls = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const data = JSON.parse(event.target.result);
-        state.layers = data.layers || [];
-        state.fullTexturePosition = data.fullTexturePosition || [0, 0, 0];
-        state.fullTextureRotation = data.fullTextureRotation || [0, 0, 0];
-        state.fullTextureScale = data.fullTextureScale || [1, 1, 1];
-        state.color = data.color || '#EFBD48';
-        state.activeLayerId = state.layers.length > 0 ? state.layers[0].id : null;
-        alert('Preset imported successfully!');
+        const preset = JSON.parse(event.target.result);
+        
+        // Handle both old format and new preset format
+        if (preset.data) {
+          // New preset format
+          state.savedPresets.push(preset);
+          localStorage.setItem('clothingPresets', JSON.stringify(state.savedPresets));
+          alert(`Preset "${preset.name}" imported! You can now load it or apply with a new image.`);
+        } else {
+          // Old format - direct apply
+          state.layers = preset.layers || [];
+          state.fullTexturePosition = preset.fullTexturePosition || [0, 0, 0];
+          state.fullTextureRotation = preset.fullTextureRotation || [0, 0, 0];
+          state.fullTextureScale = preset.fullTextureScale || [1, 1, 1];
+          state.color = preset.color || '#EFBD48';
+          state.activeLayerId = state.layers.length > 0 ? state.layers[0].id : null;
+          alert('Preset imported and applied successfully!');
+        }
       } catch (err) {
         alert('Error importing preset: ' + err.message);
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
 
   // Load saved presets from localStorage on mount
@@ -560,6 +600,15 @@ const LayerControls = () => {
       {/* ========== PRESETS TAB ========== */}
       {activeTab === 'presets' && (
         <>
+          {/* Hidden input for applying preset with new image */}
+          <input
+            ref={applyPresetImageRef}
+            type="file"
+            accept="image/*"
+            onChange={handleNewImageForPreset}
+            className="hidden"
+          />
+          
           <div className="mb-4 space-y-2">
             <button
               className="w-full bg-green-500 hover:bg-green-600 text-white text-sm font-medium py-2 rounded-lg transition-colors"
@@ -567,21 +616,44 @@ const LayerControls = () => {
             >
               💾 Save Current as Preset
             </button>
-            <button
-              className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium py-2 rounded-lg transition-colors"
-              onClick={exportPreset}
-            >
-              📤 Export to File
-            </button>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+                onClick={exportPreset}
+              >
+                📤 Export Full
+              </button>
+              <button
+                className="bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+                onClick={exportPresetSettingsOnly}
+                title="Export settings only (smaller file, no images)"
+              >
+                📋 Export Settings
+              </button>
+            </div>
+            
             <label className="block w-full bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium py-2 rounded-lg transition-colors text-center cursor-pointer">
-              📥 Import from File
+              📥 Import Preset File
               <input
+                ref={presetImportRef}
                 type="file"
                 accept=".json"
                 onChange={importPreset}
                 className="hidden"
               />
             </label>
+          </div>
+
+          {/* Instructions */}
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-xs text-blue-700 font-medium mb-1">📌 Preset Features:</p>
+            <ul className="text-xs text-blue-600 space-y-1">
+              <li>• <strong>Save</strong>: Saves all layers, positions, scales, crops</li>
+              <li>• <strong>Load</strong>: Restores preset with original images</li>
+              <li>• <strong>Apply with New Image</strong>: Uses your settings with a new image</li>
+              <li>• <strong>Export Settings</strong>: Smaller file without images</li>
+            </ul>
           </div>
 
           {/* Saved Presets List */}
@@ -596,31 +668,81 @@ const LayerControls = () => {
                 snap.savedPresets.map((preset) => (
                   <div
                     key={preset.id}
-                    className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                    className="p-3 bg-gray-50 rounded-lg border border-gray-200"
                   >
-                    <div>
-                      <p className="text-xs font-medium text-gray-700">{preset.name}</p>
-                      <p className="text-xs text-gray-400">
-                        {new Date(preset.date).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <div className="flex gap-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="text-sm font-medium text-gray-700">{preset.name}</p>
+                        <p className="text-xs text-gray-400">
+                          {new Date(preset.date).toLocaleDateString()} • {preset.data?.layers?.length || 0} layers
+                        </p>
+                        {preset.settingsOnly && (
+                          <span className="text-xs text-orange-500">⚠️ Settings only (no images)</span>
+                        )}
+                      </div>
                       <button
-                        className="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-600 text-xs rounded"
-                        onClick={() => loadPreset(preset)}
-                      >
-                        Load
-                      </button>
-                      <button
-                        className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-600 text-xs rounded"
+                        className="p-1 hover:bg-red-100 rounded text-red-500"
                         onClick={() => deletePreset(preset.id)}
+                        title="Delete preset"
                       >
                         🗑️
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      {!preset.settingsOnly && (
+                        <button
+                          className="flex-1 px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-600 text-xs rounded font-medium"
+                          onClick={() => loadPreset(preset)}
+                        >
+                          📂 Load
+                        </button>
+                      )}
+                      <button
+                        className="flex-1 px-2 py-1 bg-green-100 hover:bg-green-200 text-green-600 text-xs rounded font-medium"
+                        onClick={() => handleApplyPresetWithNewImage(preset)}
+                        title="Apply this preset's settings to a new image"
+                      >
+                        🖼️ Apply New Image
                       </button>
                     </div>
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="mt-4 pt-4 border-t">
+            <h4 className="text-xs font-semibold text-gray-600 mb-2">⚡ Quick Actions</h4>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="px-2 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded font-medium"
+                onClick={() => {
+                  if (confirm('Clear all layers?')) {
+                    state.layers = [];
+                    state.activeLayerId = null;
+                    state.nextLayerId = 1;
+                  }
+                }}
+              >
+                🗑️ Clear Layers
+              </button>
+              <button
+                className="px-2 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded font-medium"
+                onClick={() => {
+                  if (confirm('Reset all settings to default?')) {
+                    state.layers = [];
+                    state.activeLayerId = null;
+                    state.nextLayerId = 1;
+                    state.fullTexturePosition = [0, 0, 0];
+                    state.fullTextureRotation = [0, 0, 0];
+                    state.fullTextureScale = [1, 1, 1];
+                    state.color = '#EFBD48';
+                  }
+                }}
+              >
+                🔄 Reset All
+              </button>
             </div>
           </div>
         </>

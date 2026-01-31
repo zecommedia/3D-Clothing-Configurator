@@ -11,12 +11,9 @@ import state from '../store';
 // ============================================
 
 // Apply border radius to image
+// Apply border radius and return a THREE.Texture directly
 const applyBorderRadius = (imageSrc, borderRadius) => {
   return new Promise((resolve) => {
-    if (borderRadius === 0) {
-      resolve(imageSrc);
-      return;
-    }
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -25,29 +22,48 @@ const applyBorderRadius = (imageSrc, borderRadius) => {
       canvas.width = img.width;
       canvas.height = img.height;
       
-      const rx = (borderRadius / 100) * (img.width / 2);
-      const ry = (borderRadius / 100) * (img.height / 2);
+      // Clear canvas with transparency
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      ctx.beginPath();
-      if (borderRadius >= 50) {
-        ctx.ellipse(img.width / 2, img.height / 2, img.width / 2, img.height / 2, 0, 0, Math.PI * 2);
-      } else {
-        ctx.moveTo(rx, 0);
-        ctx.lineTo(img.width - rx, 0);
-        ctx.ellipse(img.width - rx, ry, rx, ry, 0, -Math.PI / 2, 0);
-        ctx.lineTo(img.width, img.height - ry);
-        ctx.ellipse(img.width - rx, img.height - ry, rx, ry, 0, 0, Math.PI / 2);
-        ctx.lineTo(rx, img.height);
-        ctx.ellipse(rx, img.height - ry, rx, ry, 0, Math.PI / 2, Math.PI);
-        ctx.lineTo(0, ry);
-        ctx.ellipse(rx, ry, rx, ry, 0, Math.PI, Math.PI * 1.5);
+      if (borderRadius > 0) {
+        // Calculate radius based on percentage of smaller dimension
+        const minDim = Math.min(img.width, img.height);
+        const radius = (borderRadius / 100) * (minDim / 2);
+        
+        ctx.beginPath();
+        if (borderRadius >= 50) {
+          // Full ellipse/circle
+          ctx.ellipse(img.width / 2, img.height / 2, img.width / 2, img.height / 2, 0, 0, Math.PI * 2);
+        } else {
+          // Rounded rectangle
+          const x = 0, y = 0, w = img.width, h = img.height;
+          ctx.moveTo(x + radius, y);
+          ctx.lineTo(x + w - radius, y);
+          ctx.arcTo(x + w, y, x + w, y + radius, radius);
+          ctx.lineTo(x + w, y + h - radius);
+          ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+          ctx.lineTo(x + radius, y + h);
+          ctx.arcTo(x, y + h, x, y + h - radius, radius);
+          ctx.lineTo(x, y + radius);
+          ctx.arcTo(x, y, x + radius, y, radius);
+        }
+        ctx.closePath();
+        ctx.clip();
       }
-      ctx.closePath();
-      ctx.clip();
+      
       ctx.drawImage(img, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
+      
+      // Create THREE.Texture directly from canvas
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.flipY = true;
+      texture.needsUpdate = true;
+      resolve(texture);
     };
-    img.onerror = () => resolve(imageSrc);
+    img.onerror = () => {
+      // Fallback: create texture from original image
+      const texture = new THREE.TextureLoader().load(imageSrc);
+      resolve(texture);
+    };
     img.src = imageSrc;
   });
 };
@@ -75,32 +91,26 @@ const createTextTexture = (text, font, size, color) => {
 // LAYER DECAL COMPONENT
 // ============================================
 const LayerDecal = ({ layer }) => {
-  const [processedImage, setProcessedImage] = useState(layer.image);
+  const [texture, setTexture] = useState(null);
   const [textureKey, setTextureKey] = useState(0);
   
   useEffect(() => {
-    const processImage = async () => {
-      let result = layer.image;
-      if (layer.borderRadius > 0) {
-        result = await applyBorderRadius(layer.image, layer.borderRadius);
-      }
-      setProcessedImage(result);
-      // Force texture reload when image changes
+    const loadTexture = async () => {
+      const tex = await applyBorderRadius(layer.image, layer.borderRadius);
+      setTexture(tex);
       setTextureKey(prev => prev + 1);
     };
-    processImage();
+    loadTexture();
+    
+    // Cleanup old texture
+    return () => {
+      if (texture) {
+        texture.dispose();
+      }
+    };
   }, [layer.image, layer.borderRadius]);
   
-  const texture = useTexture(processedImage);
-  
-  // Force texture update
-  useEffect(() => {
-    if (texture) {
-      texture.needsUpdate = true;
-    }
-  }, [texture, textureKey, processedImage]);
-  
-  if (!layer.visible) return null;
+  if (!layer.visible || !texture) return null;
   
   return (
     <Decal
@@ -118,32 +128,26 @@ const LayerDecal = ({ layer }) => {
 
 // Layer Decal for Hoodie with scale factor
 const HoodieLayerDecal = ({ layer, scaleFactor }) => {
-  const [processedImage, setProcessedImage] = useState(layer.image);
+  const [texture, setTexture] = useState(null);
   const [textureKey, setTextureKey] = useState(0);
   
   useEffect(() => {
-    const processImage = async () => {
-      let result = layer.image;
-      if (layer.borderRadius > 0) {
-        result = await applyBorderRadius(layer.image, layer.borderRadius);
-      }
-      setProcessedImage(result);
-      // Force texture reload when image changes
+    const loadTexture = async () => {
+      const tex = await applyBorderRadius(layer.image, layer.borderRadius);
+      setTexture(tex);
       setTextureKey(prev => prev + 1);
     };
-    processImage();
+    loadTexture();
+    
+    // Cleanup old texture
+    return () => {
+      if (texture) {
+        texture.dispose();
+      }
+    };
   }, [layer.image, layer.borderRadius]);
   
-  const texture = useTexture(processedImage);
-  
-  // Force texture update
-  useEffect(() => {
-    if (texture) {
-      texture.needsUpdate = true;
-    }
-  }, [texture, textureKey, processedImage]);
-  
-  if (!layer.visible) return null;
+  if (!layer.visible || !texture) return null;
   
   const scaledPos = [
     layer.position[0] * scaleFactor,

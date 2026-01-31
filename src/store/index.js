@@ -45,7 +45,104 @@ export const createLayer = (id, image, name = `Layer ${id}`, cropInfo = null, so
   cropInfo: cropInfo,  // { x, y, width, height, unit } - stores crop coordinates
   // Mesh indices for Hoodie (which meshes to apply decal to)
   targetMeshIndices: [0],
+  // Layer type: 'image' or 'color'
+  layerType: 'image',
+  // Color for color layers (hex string)
+  color: null,
 });
+
+// Create a solid color layer
+export const createColorLayer = (id, color, name = `Color ${id}`) => {
+  // Create a canvas with solid color
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const colorImage = canvas.toDataURL('image/png');
+  
+  return {
+    id,
+    name,
+    image: colorImage,
+    originalImage: colorImage,
+    sourceImageId: `color_${Date.now()}`,
+    visible: true,
+    opacity: 1,
+    position: [0, 0, 0.3],
+    rotation: [0, 0, 0],
+    scale: [0.3, 0.3, 0.3],
+    borderRadius: 0,
+    blendMode: 'normal',
+    cropInfo: null,
+    targetMeshIndices: [0],
+    layerType: 'color',
+    color: color,
+  };
+};
+
+// Get center color from an image
+export const getCenterColor = (imageSrc) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      
+      // Get center pixel
+      const centerX = Math.floor(img.width / 2);
+      const centerY = Math.floor(img.height / 2);
+      
+      // Sample a small area around center for better accuracy
+      const sampleSize = 5;
+      let r = 0, g = 0, b = 0, count = 0;
+      
+      for (let dx = -sampleSize; dx <= sampleSize; dx++) {
+        for (let dy = -sampleSize; dy <= sampleSize; dy++) {
+          const x = Math.max(0, Math.min(img.width - 1, centerX + dx));
+          const y = Math.max(0, Math.min(img.height - 1, centerY + dy));
+          const pixel = ctx.getImageData(x, y, 1, 1).data;
+          r += pixel[0];
+          g += pixel[1];
+          b += pixel[2];
+          count++;
+        }
+      }
+      
+      r = Math.round(r / count);
+      g = Math.round(g / count);
+      b = Math.round(b / count);
+      
+      const hex = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+      resolve(hex);
+    };
+    img.onerror = () => resolve('#888888'); // Default gray on error
+    img.src = imageSrc;
+  });
+};
+
+// Update color layer's color
+export const updateColorLayerColor = (layerId, newColor) => {
+  const layer = state.layers.find(l => l.id === layerId);
+  if (!layer || layer.layerType !== 'color') return;
+  
+  // Recreate canvas with new color
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = newColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  layer.image = canvas.toDataURL('image/png');
+  layer.originalImage = layer.image;
+  layer.color = newColor;
+};
 
 // Duplicate a layer with same source (for Smart Object)
 export const duplicateLayer = (layerId) => {

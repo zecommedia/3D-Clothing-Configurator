@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useSnapshot } from 'valtio';
-import state, { createLayer, createPreset, applyPreset, duplicateLayer, replaceSourceImage, applyCropToImage } from '../store';
+import state, { createLayer, createPreset, applyPreset, duplicateLayer, replaceSourceImage, applyCropToImage, createColorLayer, getCenterColor, updateColorLayerColor } from '../store';
 
 const LayerControls = () => {
   const snap = useSnapshot(state);
@@ -9,6 +9,7 @@ const LayerControls = () => {
   const presetImportRef = useRef(null);
   const applyPresetImageRef = useRef(null);
   const replaceImageRef = useRef(null);
+  const colorFromImageRef = useRef(null);
   const [activeTab, setActiveTab] = useState('layers'); // 'layers', 'fullTexture', 'presets'
   const [selectedPresetId, setSelectedPresetId] = useState(null); // For applying preset with new image
   const [replaceLayerId, setReplaceLayerId] = useState(null); // For replacing source image
@@ -129,6 +130,34 @@ const LayerControls = () => {
     }
     
     layer.targetMeshIndices = current;
+  };
+
+  // ========== COLOR LAYER FUNCTIONS ==========
+  const handleAddColorLayer = (color = '#888888') => {
+    const newLayer = createColorLayer(state.nextLayerId, color, `Color Layer`);
+    state.layers.push(newLayer);
+    state.activeLayerId = state.nextLayerId;
+    state.nextLayerId += 1;
+  };
+
+  const handleColorFromImage = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const color = await getCenterColor(event.target.result);
+      const newLayer = createColorLayer(state.nextLayerId, color, `Color from ${file.name.replace(/\.[^/.]+$/, '')}`);
+      state.layers.push(newLayer);
+      state.activeLayerId = state.nextLayerId;
+      state.nextLayerId += 1;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleColorChange = (layerId, newColor) => {
+    updateColorLayerColor(layerId, newColor);
   };
 
   // ========== LAYER PROPERTY UPDATES ==========
@@ -361,6 +390,31 @@ const LayerControls = () => {
               onChange={handleReplaceImageUpload}
               className="hidden"
             />
+            
+            {/* Color Layer Buttons */}
+            <div className="flex gap-2">
+              <button
+                className="flex-1 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+                onClick={() => handleAddColorLayer('#888888')}
+                title="Add a solid color layer"
+              >
+                🎨 Add Color
+              </button>
+              <input
+                ref={colorFromImageRef}
+                type="file"
+                accept="image/*"
+                onChange={handleColorFromImage}
+                className="hidden"
+              />
+              <button
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+                onClick={() => colorFromImageRef.current?.click()}
+                title="Pick center color from an image"
+              >
+                🔍 Color from Image
+              </button>
+            </div>
           </div>
 
           {/* Layer List */}
@@ -458,7 +512,34 @@ const LayerControls = () => {
             <div className="border-t pt-4">
               <h4 className="text-xs font-semibold text-gray-600 mb-2">
                 ⚙️ Editing: {activeLayer.name}
+                {activeLayer.layerType === 'color' && <span className="ml-2 text-purple-500">(Color Layer)</span>}
               </h4>
+
+              {/* Color Picker for Color Layers */}
+              {activeLayer.layerType === 'color' && (
+                <div className="mb-3 bg-purple-50 rounded-lg p-2">
+                  <h5 className="text-xs text-purple-700 font-medium mb-2">🎨 Layer Color</h5>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={activeLayer.color || '#888888'}
+                      onChange={(e) => handleColorChange(activeLayer.id, e.target.value)}
+                      className="w-10 h-10 rounded cursor-pointer border-0"
+                    />
+                    <input
+                      type="text"
+                      value={activeLayer.color || '#888888'}
+                      onChange={(e) => {
+                        if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
+                          handleColorChange(activeLayer.id, e.target.value);
+                        }
+                      }}
+                      className="flex-1 px-2 py-1 text-xs border rounded"
+                      placeholder="#RRGGBB"
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Opacity & Border Radius */}
               <div className="mb-3 bg-gray-50 rounded-lg p-2 space-y-2">

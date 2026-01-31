@@ -158,8 +158,8 @@ const LayerControls = () => {
     alert(`Preset "${presetName}" saved with ${snap.layers.length} layers!`);
   };
 
-  const loadPreset = (preset) => {
-    applyPreset(preset);
+  const loadPreset = async (preset) => {
+    await applyPreset(preset);
     alert(`Preset "${preset.name}" loaded successfully!`);
   };
 
@@ -177,8 +177,8 @@ const LayerControls = () => {
     if (!preset) return;
     
     const reader = new FileReader();
-    reader.onload = (event) => {
-      applyPreset(preset, event.target.result);
+    reader.onload = async (event) => {
+      await applyPreset(preset, event.target.result);
       alert(`Preset "${preset.name}" applied with new image!`);
     };
     reader.readAsDataURL(file);

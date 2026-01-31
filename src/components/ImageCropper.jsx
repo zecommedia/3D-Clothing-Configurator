@@ -92,6 +92,9 @@ const ImageCropper = () => {
         // Store natural dimensions of the SOURCE image for proportional re-cropping
         naturalWidth: imgRef.current.naturalWidth,
         naturalHeight: imgRef.current.naturalHeight,
+        // Store display dimensions for backward compatibility debugging
+        displayWidth: imgRef.current.width,
+        displayHeight: imgRef.current.height,
         // Mark as new format
         format: 'natural',
       };

@@ -76,21 +76,35 @@ const createTextTexture = (text, font, size, color) => {
 // ============================================
 const LayerDecal = ({ layer }) => {
   const [processedImage, setProcessedImage] = useState(layer.image);
+  const [textureKey, setTextureKey] = useState(0);
   
   useEffect(() => {
-    if (layer.borderRadius > 0) {
-      applyBorderRadius(layer.image, layer.borderRadius).then(setProcessedImage);
-    } else {
-      setProcessedImage(layer.image);
-    }
+    const processImage = async () => {
+      let result = layer.image;
+      if (layer.borderRadius > 0) {
+        result = await applyBorderRadius(layer.image, layer.borderRadius);
+      }
+      setProcessedImage(result);
+      // Force texture reload when image changes
+      setTextureKey(prev => prev + 1);
+    };
+    processImage();
   }, [layer.image, layer.borderRadius]);
   
   const texture = useTexture(processedImage);
+  
+  // Force texture update
+  useEffect(() => {
+    if (texture) {
+      texture.needsUpdate = true;
+    }
+  }, [texture, textureKey, processedImage]);
   
   if (!layer.visible) return null;
   
   return (
     <Decal
+      key={`${layer.id}-${textureKey}`}
       position={layer.position}
       rotation={layer.rotation}
       scale={layer.scale}
@@ -105,16 +119,29 @@ const LayerDecal = ({ layer }) => {
 // Layer Decal for Hoodie with scale factor
 const HoodieLayerDecal = ({ layer, scaleFactor }) => {
   const [processedImage, setProcessedImage] = useState(layer.image);
+  const [textureKey, setTextureKey] = useState(0);
   
   useEffect(() => {
-    if (layer.borderRadius > 0) {
-      applyBorderRadius(layer.image, layer.borderRadius).then(setProcessedImage);
-    } else {
-      setProcessedImage(layer.image);
-    }
+    const processImage = async () => {
+      let result = layer.image;
+      if (layer.borderRadius > 0) {
+        result = await applyBorderRadius(layer.image, layer.borderRadius);
+      }
+      setProcessedImage(result);
+      // Force texture reload when image changes
+      setTextureKey(prev => prev + 1);
+    };
+    processImage();
   }, [layer.image, layer.borderRadius]);
   
   const texture = useTexture(processedImage);
+  
+  // Force texture update
+  useEffect(() => {
+    if (texture) {
+      texture.needsUpdate = true;
+    }
+  }, [texture, textureKey, processedImage]);
   
   if (!layer.visible) return null;
   
@@ -131,6 +158,7 @@ const HoodieLayerDecal = ({ layer, scaleFactor }) => {
   
   return (
     <Decal
+      key={`${layer.id}-${textureKey}`}
       position={scaledPos}
       rotation={layer.rotation}
       scale={scaledScale}
@@ -182,8 +210,8 @@ const TShirt = () => {
           />
         )}
 
-        {/* Layers */}
-        {snap.layers.filter(l => l.visible).map((layer) => (
+        {/* Layers - render in reverse order so first layer (top in UI) appears on top in 3D */}
+        {[...snap.layers].filter(l => l.visible).reverse().map((layer) => (
           <LayerDecal key={layer.id} layer={layer} />
         ))}
 
@@ -320,10 +348,10 @@ const Hoodie = () => {
   
   // Render decals for a specific mesh index
   const renderDecalsForMesh = (meshIndex) => {
-    // Filter layers that target this mesh
-    const layersForMesh = snap.layers.filter(l => 
+    // Filter layers that target this mesh - reverse order so first layer (top in UI) appears on top
+    const layersForMesh = [...snap.layers].filter(l => 
       l.visible && (l.targetMeshIndices || [0]).includes(meshIndex)
-    );
+    ).reverse();
     
     // Check if global decals should render on this mesh
     const shouldRenderGlobal = snap.selectedMeshIndices.includes(meshIndex);

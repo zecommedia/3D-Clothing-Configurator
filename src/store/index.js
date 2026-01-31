@@ -67,17 +67,32 @@ export const duplicateLayer = (layerId) => {
 
 // Apply crop to image
 // NEW format (format='natural'): x/y/width/height are in NATURAL coordinates
-// OLD format (no format field): x/y/width/height are in DISPLAY coordinates, need to scale
-export const applyCropToImage = (originalImage, cropInfo) => {
+// OLD format (no format field): x/y/width/height are in DISPLAY coordinates
+// originalCroppedImage: optional - the original cropped image from preset, used to calculate exact display dimensions for OLD format
+export const applyCropToImage = (originalImage, cropInfo, originalCroppedImage = null) => {
   return new Promise((resolve) => {
     if (!cropInfo || !originalImage) {
       resolve(originalImage);
       return;
     }
     
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
+    // Helper to load an image and get its dimensions
+    const loadImage = (src) => new Promise((res) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => res(img);
+      img.onerror = () => res(null);
+      img.src = src;
+    });
+    
+    // For OLD format, try to get exact display dimensions from original cropped image
+    const processWithCroppedRef = async () => {
+      const img = await loadImage(originalImage);
+      if (!img) {
+        resolve(originalImage);
+        return;
+      }
+      
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
@@ -88,7 +103,7 @@ export const applyCropToImage = (originalImage, cropInfo) => {
       
       if (cropInfo.format === 'natural') {
         // NEW FORMAT: coordinates are already in natural pixels
-        // Just scale proportionally to new image size
+        // Scale proportionally to new image size
         const scaleX = img.naturalWidth / origNatWidth;
         const scaleY = img.naturalHeight / origNatHeight;
         
@@ -98,21 +113,71 @@ export const applyCropToImage = (originalImage, cropInfo) => {
         cropH = cropInfo.height * scaleY;
       } else {
         // OLD FORMAT: coordinates are in DISPLAY pixels
-        // We need to first convert to natural coords, then scale
-        // OLD presets: the crop was done with display coords, then getCroppedImg scaled them
-        // So the actual crop region used was (x * scaleX_old, y * scaleY_old, ...)
-        // where scaleX_old = naturalWidth / displayWidth
-        // But we don't have displayWidth! So we need to estimate.
+        // Try to calculate exact display dimensions from original cropped image
         
-        // WORKAROUND: Assume the crop coordinates are proportional to natural dimensions
-        // This works if user uploads image with same aspect ratio
-        const scaleX = img.naturalWidth / origNatWidth;
-        const scaleY = img.naturalHeight / origNatHeight;
+        let displayScaleX, displayScaleY;
         
-        cropX = cropInfo.x * scaleX;
-        cropY = cropInfo.y * scaleY;
-        cropW = cropInfo.width * scaleX;
-        cropH = cropInfo.height * scaleY;
+        if (originalCroppedImage) {
+          // Load original cropped image to get its dimensions
+          const croppedImg = await loadImage(originalCroppedImage);
+          if (croppedImg) {
+            // The cropped image dimensions = display crop dimensions * (naturalSize / displaySize)
+            // croppedWidth = cropInfo.width * (origNatWidth / displayWidth)
+            // So: displayWidth = cropInfo.width * origNatWidth / croppedWidth
+            // And: displayScaleX = origNatWidth / displayWidth = croppedWidth / cropInfo.width
+            
+            displayScaleX = croppedImg.naturalWidth / cropInfo.width;
+            displayScaleY = croppedImg.naturalHeight / cropInfo.height;
+          }
+        }
+        
+        if (!displayScaleX || !displayScaleY) {
+          // Fallback: estimate display dimensions
+          const origAspect = origNatWidth / origNatHeight;
+          const maxDisplayWidth = 800;
+          const maxDisplayHeight = 600;
+          
+          let estimatedDisplayWidth, estimatedDisplayHeight;
+          
+          if (origAspect > maxDisplayWidth / maxDisplayHeight) {
+            estimatedDisplayWidth = maxDisplayWidth;
+            estimatedDisplayHeight = maxDisplayWidth / origAspect;
+          } else {
+            estimatedDisplayHeight = maxDisplayHeight;
+            estimatedDisplayWidth = maxDisplayHeight * origAspect;
+          }
+          
+          // Validate and adjust
+          const cropRight = cropInfo.x + cropInfo.width;
+          const cropBottom = cropInfo.y + cropInfo.height;
+          
+          if (cropRight > estimatedDisplayWidth) {
+            estimatedDisplayWidth = cropRight * 1.05;
+            estimatedDisplayHeight = estimatedDisplayWidth / origAspect;
+          }
+          if (cropBottom > estimatedDisplayHeight) {
+            estimatedDisplayHeight = cropBottom * 1.05;
+            estimatedDisplayWidth = estimatedDisplayHeight * origAspect;
+          }
+          
+          displayScaleX = origNatWidth / estimatedDisplayWidth;
+          displayScaleY = origNatHeight / estimatedDisplayHeight;
+        }
+        
+        // Convert display coords to natural coords using calculated scale
+        const natCropX = cropInfo.x * displayScaleX;
+        const natCropY = cropInfo.y * displayScaleY;
+        const natCropW = cropInfo.width * displayScaleX;
+        const natCropH = cropInfo.height * displayScaleY;
+        
+        // Scale to new image dimensions
+        const scaleToNewX = img.naturalWidth / origNatWidth;
+        const scaleToNewY = img.naturalHeight / origNatHeight;
+        
+        cropX = natCropX * scaleToNewX;
+        cropY = natCropY * scaleToNewY;
+        cropW = natCropW * scaleToNewX;
+        cropH = natCropH * scaleToNewY;
       }
       
       // Ensure we don't exceed image bounds
@@ -128,8 +193,8 @@ export const applyCropToImage = (originalImage, cropInfo) => {
       
       resolve(canvas.toDataURL('image/png'));
     };
-    img.onerror = () => resolve(originalImage);
-    img.src = originalImage;
+    
+    processWithCroppedRef();
   });
 };
 
@@ -207,18 +272,30 @@ export const createPreset = (name, state) => ({
 });
 
 // Apply a preset, optionally with a new image to replace layer images
-export const applyPreset = (preset, newImage = null) => {
+export const applyPreset = async (preset, newImage = null) => {
   const data = preset.data;
   
   // Apply layers with optional new image
   if (newImage) {
-    // Replace all layer images with the new image, keeping settings
-    state.layers = data.layers.map((layer, index) => ({
-      ...layer,
-      id: layer.id,
-      image: newImage, // Use new image
-      originalImage: newImage,
-    }));
+    // Replace all layer images with the new image, applying crop settings from preset
+    const newLayers = [];
+    for (const layer of data.layers) {
+      let croppedImage = newImage;
+      
+      // Apply crop if layer has cropInfo
+      if (layer.cropInfo) {
+        // Pass original cropped image to help calculate display dimensions for old format
+        croppedImage = await applyCropToImage(newImage, layer.cropInfo, layer.image);
+      }
+      
+      newLayers.push({
+        ...layer,
+        id: layer.id,
+        image: croppedImage,        // Cropped new image
+        originalImage: newImage,     // Keep original for re-cropping
+      });
+    }
+    state.layers = newLayers;
   } else {
     state.layers = JSON.parse(JSON.stringify(data.layers));
   }
